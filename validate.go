@@ -8,40 +8,49 @@ import (
 	kubewarden "github.com/kubewarden/policy-sdk-go"
 )
 
+type Settings struct {
+}
+
+func isPalindrome(input string) bool {
+	for i := 0; i < len(input)/2; i++ {
+		if input[i] != input[len(input)-i-1] {
+			return false
+		}
+	}
+	return true
+}
+
 func validate(payload []byte) ([]byte, error) {
-	settings, err := NewSettingsFromValidationReq(payload)
-	if err != nil {
-		return kubewarden.RejectRequest(
-			kubewarden.Message(err.Error()),
-			kubewarden.Code(400))
-	}
+	name := gjson.GetBytes(payload, "request.object.metadata.name").String()
+	namespace := gjson.GetBytes(payload, "request.object.metadata.namespace").String()
 
-	data := gjson.GetBytes(
-		payload,
-		"request.object.metadata.name")
-
-	if !data.Exists() {
-		logger.Warn("cannot read object name from metadata: accepting request")
-		return kubewarden.AcceptRequest()
-	}
-	name := data.String()
-
-	logger.DebugWithFields("validating ingress object", func(e onelog.Entry) {
-		namespace := gjson.GetBytes(payload, "request.object.metadata.namespace").String()
+	logger.DebugWithFields("validating pod object", func(e onelog.Entry) {
 		e.String("name", name)
 		e.String("namespace", namespace)
 	})
 
-	if settings.DeniedNames.Contains(name) {
-		logger.InfoWithFields("rejecting ingress object", func(e onelog.Entry) {
-			e.String("name", name)
-			e.String("denied_names", settings.DeniedNames.String())
-		})
+	data := gjson.GetBytes(
+		payload,
+		"request.object.metadata.labels")
 
-		return kubewarden.RejectRequest(
-			kubewarden.Message(
-				fmt.Sprintf("The '%s' name is on the deny list", name)),
-			kubewarden.NoCode)
+	if !data.Exists() {
+		logger.Warn("cannot read labels from metadata: accepting request")
+		return kubewarden.AcceptRequest()
+	}
+
+	labels := data.Map()
+	for k := range labels {
+		if isPalindrome(k) {
+			logger.InfoWithFields("rejecting pod object", func(e onelog.Entry) {
+				e.String("name", name)
+				e.String("namespace", namespace)
+				e.String("label", k)
+			})
+			return kubewarden.RejectRequest(
+				kubewarden.Message(fmt.Sprintf("The '%s' label is a palidrome", k)),
+				kubewarden.NoCode,
+			)
+		}
 	}
 
 	return kubewarden.AcceptRequest()
